@@ -2,6 +2,7 @@ import os
 import subprocess
 import zipfile
 import shutil
+import glob
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.path.join(PROJECT_DIR, "build")
@@ -9,17 +10,62 @@ SRC_DIR = os.path.join(PROJECT_DIR, "src")
 RES_DIR = os.path.join(PROJECT_DIR, "res")
 ASSETS_DIR = os.path.join(PROJECT_DIR, "assets")
 
-SDK_DIR = r"C:\Users\quyet\AppData\Local\Android\Sdk"
-BUILD_TOOLS_DIR = os.path.join(SDK_DIR, "build-tools", "35.0.0")
-AAPT2 = os.path.join(BUILD_TOOLS_DIR, "aapt2.exe")
-D8 = os.path.join(BUILD_TOOLS_DIR, "d8.bat")
-APKSIGNER = os.path.join(BUILD_TOOLS_DIR, "apksigner.bat")
-ANDROID_JAR = os.path.join(SDK_DIR, "platforms", "android-35", "android.jar")
-JAVAC = r"C:\Program Files\Android\Android Studio\jbr\bin\javac.exe"
-KEYSTORE = r"C:\Users\quyet\.android\debug.keystore"
+# Detect SDK Directory
+SDK_DIR = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+if not SDK_DIR or not os.path.exists(SDK_DIR):
+    default_sdk = os.path.expanduser(r"~\AppData\Local\Android\Sdk")
+    if os.path.exists(default_sdk):
+        SDK_DIR = default_sdk
+    else:
+        raise RuntimeError("Android SDK not found! Please set ANDROID_HOME or ANDROID_SDK_ROOT.")
 
-os.environ["JAVA_HOME"] = r"C:\Program Files\Android\Android Studio\jbr"
-os.environ["PATH"] = r"C:\Program Files\Android\Android Studio\jbr\bin;" + os.environ.get("PATH", "")
+print(f"Using Android SDK: {SDK_DIR}")
+
+# Detect build-tools
+build_tools_dirs = sorted(glob.glob(os.path.join(SDK_DIR, "build-tools", "*")), reverse=True)
+if not build_tools_dirs:
+    raise RuntimeError("No build-tools found in Android SDK!")
+BUILD_TOOLS_DIR = build_tools_dirs[0]
+print(f"Using build-tools: {BUILD_TOOLS_DIR}")
+
+AAPT2 = os.path.join(BUILD_TOOLS_DIR, "aapt2.exe") if os.name == 'nt' else os.path.join(BUILD_TOOLS_DIR, "aapt2")
+D8 = os.path.join(BUILD_TOOLS_DIR, "d8.bat") if os.name == 'nt' else os.path.join(BUILD_TOOLS_DIR, "d8")
+APKSIGNER = os.path.join(BUILD_TOOLS_DIR, "apksigner.bat") if os.name == 'nt' else os.path.join(BUILD_TOOLS_DIR, "apksigner")
+
+# Detect android.jar
+platform_dirs = sorted(glob.glob(os.path.join(SDK_DIR, "platforms", "android-*")), reverse=True)
+if not platform_dirs:
+    raise RuntimeError("No platforms found in Android SDK!")
+# Prefer android-34 or 35 if available, else latest
+ANDROID_JAR = None
+for p in platform_dirs:
+    jar = os.path.join(p, "android.jar")
+    if os.path.exists(jar):
+        ANDROID_JAR = jar
+        break
+print(f"Using android.jar: {ANDROID_JAR}")
+
+# Detect javac
+JAVAC = shutil.which("javac")
+if not JAVAC:
+    possible_javacs = glob.glob(r"C:\Program Files\Java\*\bin\javac.exe") + glob.glob(r"C:\Program Files\Android\Android Studio\jbr\bin\javac.exe")
+    if possible_javacs:
+        JAVAC = possible_javacs[-1]
+    else:
+        raise RuntimeError("javac not found! Please install JDK.")
+print(f"Using javac: {JAVAC}")
+
+# Keystore
+KEYSTORE = os.path.expanduser(r"~\.android\debug.keystore")
+if not os.path.exists(KEYSTORE):
+    print("Generating debug keystore...")
+    os.makedirs(os.path.dirname(KEYSTORE), exist_ok=True)
+    subprocess.run([
+        "keytool", "-genkey", "-v", "-keystore", KEYSTORE,
+        "-storepass", "android", "-alias", "androiddebugkey",
+        "-keypass", "android", "-keyalg", "RSA", "-keysize", "2048",
+        "-validity", "10000", "-dname", "CN=Android Debug,O=Android,C=US"
+    ], check=True)
 
 # 1. Compile resources with aapt2
 os.makedirs(BUILD_DIR, exist_ok=True)

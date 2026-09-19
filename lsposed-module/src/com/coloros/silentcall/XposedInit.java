@@ -4,7 +4,6 @@ import android.app.Notification;
 import android.content.Context;
 import android.media.AudioTrack;
 import android.os.Bundle;
-import android.service.notification.StatusBarNotification;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -14,20 +13,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 import java.io.File;
 import java.io.InputStream;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
 
 public class XposedInit implements IXposedHookLoadPackage {
     private static final String TAG = "[SilentAICall] ";
-
-    private static String sanitizeFilename(String input) {
-        if (input == null) return "";
-        String sanitized = input.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_");
-        sanitized = sanitized.replaceAll("_+", "_");
-        sanitized = sanitized.replaceAll("^_+|_+$", "").trim();
-        return sanitized;
-    }
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -38,118 +26,353 @@ public class XposedInit implements IXposedHookLoadPackage {
         XposedBridge.log(TAG + "=== Initializing SilentAICall in com.coloros.accessibilityassistant ===");
 
         // =========================================================================
-        // 1. SILENCE ANNOUNCEMENTS (4 Layers)
+        // 1. SILENCE ANNOUNCEMENTS (Multi-Layer Architecture)
         // =========================================================================
 
-        // --- LAYER 1: Hook Manager Entry Point: com.coloros.translate.engine.mixaudio.a.e ---
+        // --- LAYER 0: Source Silencing in AccessibilityAssistant MixPromptAudioManager ---
+        // Class: com.coloros.accessibilityassistant.mixaudio.a
+        try {
+            Class<?> promptMgrClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.mixaudio.a",
+                lpparam.classLoader
+            );
+            if (promptMgrClass != null) {
+                // Hook f(boolean, Boolean) / isNeedMixAudio -> always false
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        promptMgrClass,
+                        "f",
+                        boolean.class,
+                        Boolean.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                XposedBridge.log(TAG + "Layer 0: Blocked isNeedMixAudio (f) -> false");
+                                param.setResult(false);
+                            }
+                        }
+                    );
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.f -> false");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking f: " + t.getMessage());
+                }
+
+                // Hook g(a, boolean, Boolean, int, Object) -> always false
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        promptMgrClass,
+                        "g",
+                        promptMgrClass,
+                        boolean.class,
+                        Boolean.class,
+                        int.class,
+                        Object.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                XposedBridge.log(TAG + "Layer 0: Blocked mixaudio.a.g -> false");
+                                param.setResult(false);
+                            }
+                        }
+                    );
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.g -> false");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking g: " + t.getMessage());
+                }
+
+                // Hook d() and e() -> always false
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        promptMgrClass,
+                        "d",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(false);
+                            }
+                        }
+                    );
+                    XposedHelpers.findAndHookMethod(
+                        promptMgrClass,
+                        "e",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(false);
+                            }
+                        }
+                    );
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.d and e -> false");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking d/e: " + t.getMessage());
+                }
+
+                // Hook n(Integer, String, a$a, String) / mixVoipStartPromptAudio -> bypass and call callback directly
+                try {
+                    Class<?> callbackClass = XposedHelpers.findClassIfExists(
+                        "com.coloros.accessibilityassistant.mixaudio.a$a",
+                        lpparam.classLoader
+                    );
+                    XC_MethodHook nHook = new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            XposedBridge.log(TAG + "Layer 0: Blocked mixVoipStartPromptAudio (n)");
+                            Object callback = param.args[2];
+                            if (callback != null) {
+                                try {
+                                    XposedHelpers.callMethod(callback, "a");
+                                    XposedBridge.log(TAG + "Layer 0: Invoked callback.a() directly");
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "Layer 0 callback error: " + t.getMessage());
+                                }
+                            }
+                            param.setResult(null);
+                        }
+                    };
+
+                    if (callbackClass != null) {
+                        XposedHelpers.findAndHookMethod(
+                            promptMgrClass,
+                            "n",
+                            Integer.class,
+                            String.class,
+                            callbackClass,
+                            String.class,
+                            nHook
+                        );
+                    } else {
+                        // Fallback hook by method name if inner class not resolved directly
+                        for (java.lang.reflect.Method m : promptMgrClass.getDeclaredMethods()) {
+                            if ("n".equals(m.getName()) && m.getParameterTypes().length == 4) {
+                                XposedBridge.hookMethod(m, nHook);
+                                break;
+                            }
+                        }
+                    }
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.n");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking n: " + t.getMessage());
+                }
+
+                // Hook h and k (mixCallAudio) -> bypass and call callback directly
+                try {
+                    for (java.lang.reflect.Method m : promptMgrClass.getDeclaredMethods()) {
+                        String mName = m.getName();
+                        if ("h".equals(mName) || "k".equals(mName)) {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    XposedBridge.log(TAG + "Layer 0: Blocked mixCallAudio (" + param.method.getName() + ")");
+                                    for (Object arg : param.args) {
+                                        if (arg != null) {
+                                            try {
+                                                XposedHelpers.callMethod(arg, "a");
+                                                XposedBridge.log(TAG + "Layer 0: Invoked listener.a()");
+                                                break;
+                                            } catch (Throwable ignored) {}
+                                        }
+                                    }
+                                    param.setResult(null);
+                                }
+                            });
+                        }
+                    }
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.h and k");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking h/k: " + t.getMessage());
+                }
+
+                // Hook l (mixVoipAudio) and p (stopMixVoipAudio) -> block
+                try {
+                    for (java.lang.reflect.Method m : promptMgrClass.getDeclaredMethods()) {
+                        String mName = m.getName();
+                        if ("l".equals(mName) || "p".equals(mName) || "o".equals(mName)) {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    XposedBridge.log(TAG + "Layer 0: Suppressed " + param.method.getName());
+                                    param.setResult(null);
+                                }
+                            });
+                        }
+                    }
+                    XposedBridge.log(TAG + "Layer 0: Successfully hooked mixaudio.a.l/p/o");
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Layer 0 error hooking l/p/o: " + t.getMessage());
+                }
+            } else {
+                XposedBridge.log(TAG + "Layer 0: Class com.coloros.accessibilityassistant.mixaudio.a not found");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Layer 0 error: " + t.getMessage());
+        }
+
+        // --- LAYER 1: Hook Remote Handler: com.coloros.translate.engine.remote.MixAudioEngineHandler ---
+        try {
+            Class<?> handlerClass = XposedHelpers.findClassIfExists(
+                "com.coloros.translate.engine.remote.MixAudioEngineHandler",
+                lpparam.classLoader
+            );
+            if (handlerClass != null) {
+                // Hook b(String, boolean, int, IMixAudioListener)
+                for (java.lang.reflect.Method m : handlerClass.getDeclaredMethods()) {
+                    if ("b".equals(m.getName()) && m.getParameterTypes().length == 4) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                String path = (String) param.args[0];
+                                XposedBridge.log(TAG + "Layer 1: Blocked MixAudioEngineHandler.b for: " + path);
+                                Object listener = param.args[3];
+                                if (listener != null) {
+                                    try {
+                                        XposedHelpers.callMethod(listener, "onPlayComplete", path != null ? path : "", 0);
+                                        XposedBridge.log(TAG + "Layer 1: Invoked listener.onPlayComplete");
+                                    } catch (Throwable t) {
+                                        XposedBridge.log(TAG + "Layer 1 listener error: " + t.getMessage());
+                                    }
+                                }
+                                param.setResult(null);
+                            }
+                        });
+                        XposedBridge.log(TAG + "Layer 1: Successfully hooked MixAudioEngineHandler.b");
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Layer 1 error: " + t.getMessage());
+        }
+
+        // --- LAYER 2: Hook Engine Implementation: com.coloros.translate.engine.mixaudio.engine.c ---
+        try {
+            Class<?> engineImplClass = XposedHelpers.findClassIfExists(
+                "com.coloros.translate.engine.mixaudio.engine.c",
+                lpparam.classLoader
+            );
+            if (engineImplClass != null) {
+                for (java.lang.reflect.Method m : engineImplClass.getDeclaredMethods()) {
+                    if ("mixPromptAudio".equals(m.getName())) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                String path = (String) param.args[0];
+                                XposedBridge.log(TAG + "Layer 2: Blocked engine.c.mixPromptAudio for: " + path);
+                                Object listener = param.args[3];
+                                if (listener != null) {
+                                    try {
+                                        XposedHelpers.callMethod(listener, "onPlayComplete", path != null ? path : "", 0);
+                                        XposedBridge.log(TAG + "Layer 2: Invoked listener.onPlayComplete");
+                                    } catch (Throwable t) {
+                                        XposedBridge.log(TAG + "Layer 2 listener error: " + t.getMessage());
+                                    }
+                                }
+                                param.setResult(null);
+                            }
+                        });
+                        XposedBridge.log(TAG + "Layer 2: Successfully hooked engine.c.mixPromptAudio");
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Layer 2 error: " + t.getMessage());
+        }
+
+        // --- LAYER 3: Hook Manager Entry Point: com.coloros.translate.engine.mixaudio.a.e ---
         try {
             Class<?> managerClass = XposedHelpers.findClassIfExists(
                 "com.coloros.translate.engine.mixaudio.a",
                 lpparam.classLoader
             );
             if (managerClass != null) {
-                XposedHelpers.findAndHookMethod(
-                    managerClass,
-                    "e",
-                    Context.class,
-                    boolean.class,
-                    String.class,
-                    int.class,
-                    "com.coloros.translate.engine.mixaudio.engine.e",
-                    File.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            File f = (File) param.args[5];
-                            String path = f != null ? f.getAbsolutePath() : "";
-                            XposedBridge.log(TAG + "Layer 1: Blocked mixaudio.a.e for: " + path);
-                            Object listener = param.args[4];
-                            if (listener != null) {
-                                try {
-                                    XposedHelpers.callMethod(listener, "onPlayComplete", path, 0);
-                                    XposedBridge.log(TAG + "Layer 1: Called listener.onPlayComplete");
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "Layer 1 listener error: " + t.getMessage());
+                for (java.lang.reflect.Method m : managerClass.getDeclaredMethods()) {
+                    if ("e".equals(m.getName()) || "h".equals(m.getName())) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                XposedBridge.log(TAG + "Layer 3: Blocked mixaudio.a." + param.method.getName());
+                                for (Object arg : param.args) {
+                                    if (arg != null) {
+                                        try {
+                                            XposedHelpers.callMethod(arg, "onPlayComplete", "", 0);
+                                            XposedBridge.log(TAG + "Layer 3: Invoked onPlayComplete");
+                                            break;
+                                        } catch (Throwable ignored) {}
+                                    }
                                 }
+                                param.setResult(null);
                             }
-                            param.setResult(null); // Stop original execution!
-                        }
+                        });
                     }
-                );
-                XposedBridge.log(TAG + "Layer 1: Successfully hooked mixaudio.a.e");
-            } else {
-                XposedBridge.log(TAG + "Layer 1: Class mixaudio.a not found in classLoader");
+                }
+                XposedBridge.log(TAG + "Layer 3: Successfully hooked mixaudio.a.e/h");
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Layer 1 error: " + t.getMessage());
+            XposedBridge.log(TAG + "Layer 3 error: " + t.getMessage());
         }
 
-        // --- LAYER 2: Hook Worker Player: com.coloros.translate.engine.mixaudio.mix.a.e ---
+        // --- LAYER 4: Hook Worker Player: com.coloros.translate.engine.mixaudio.mix.a.e ---
         try {
             Class<?> workerClass = XposedHelpers.findClassIfExists(
                 "com.coloros.translate.engine.mixaudio.mix.a",
                 lpparam.classLoader
             );
             if (workerClass != null) {
-                XposedHelpers.findAndHookMethod(
-                    workerClass,
-                    "e",
-                    File.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            File f = (File) param.args[0];
-                            String path = f != null ? f.getAbsolutePath() : "";
-                            XposedBridge.log(TAG + "Layer 2: Blocked mix.a.e for: " + path);
-                            try {
-                                Object listener = XposedHelpers.getObjectField(param.thisObject, "f");
-                                if (listener != null) {
-                                    XposedHelpers.callMethod(listener, "onPlayComplete", path, 0);
-                                    XposedBridge.log(TAG + "Layer 2: Called listener.onPlayComplete");
+                for (java.lang.reflect.Method m : workerClass.getDeclaredMethods()) {
+                    if ("e".equals(m.getName())) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                File f = (File) param.args[0];
+                                String path = f != null ? f.getAbsolutePath() : "";
+                                XposedBridge.log(TAG + "Layer 4: Blocked mix.a.e for: " + path);
+                                try {
+                                    Object listener = XposedHelpers.getObjectField(param.thisObject, "f");
+                                    if (listener != null) {
+                                        XposedHelpers.callMethod(listener, "onPlayComplete", path, 0);
+                                        XposedBridge.log(TAG + "Layer 4: Called listener.onPlayComplete");
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "Layer 4 listener error: " + t.getMessage());
                                 }
-                            } catch (Throwable t) {
-                                XposedBridge.log(TAG + "Layer 2 listener error: " + t.getMessage());
+                                param.setResult(null);
                             }
-                            param.setResult(null); // Stop original execution!
-                        }
+                        });
+                        XposedBridge.log(TAG + "Layer 4: Successfully hooked mix.a.e");
+                        break;
                     }
-                );
-                XposedBridge.log(TAG + "Layer 2: Successfully hooked mix.a.e");
-            } else {
-                XposedBridge.log(TAG + "Layer 2: Class mix.a not found in classLoader");
+                }
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Layer 2 error: " + t.getMessage());
+            XposedBridge.log(TAG + "Layer 4 error: " + t.getMessage());
         }
 
-        // --- LAYER 3: Hook Downlink PCM Player: com.coloros.translate.engine.mixaudio.mix.c.d ---
+        // --- LAYER 5: Hook Downlink PCM Player: com.coloros.translate.engine.mixaudio.mix.c.d ---
         try {
             Class<?> downClass = XposedHelpers.findClassIfExists(
                 "com.coloros.translate.engine.mixaudio.mix.c",
                 lpparam.classLoader
             );
             if (downClass != null) {
-                XposedHelpers.findAndHookMethod(
-                    downClass,
-                    "d",
-                    InputStream.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            XposedBridge.log(TAG + "Layer 3: Blocked mix.c.d(InputStream)");
-                            param.setResult(null); // Stop original execution!
-                        }
+                for (java.lang.reflect.Method m : downClass.getDeclaredMethods()) {
+                    if ("d".equals(m.getName()) && m.getParameterTypes().length == 1) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                XposedBridge.log(TAG + "Layer 5: Blocked mix.c.d(InputStream)");
+                                param.setResult(null);
+                            }
+                        });
+                        XposedBridge.log(TAG + "Layer 5: Successfully hooked mix.c.d");
+                        break;
                     }
-                );
-                XposedBridge.log(TAG + "Layer 3: Successfully hooked mix.c.d");
-            } else {
-                XposedBridge.log(TAG + "Layer 3: Class mix.c not found in classLoader");
+                }
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Layer 3 error: " + t.getMessage());
+            XposedBridge.log(TAG + "Layer 5 error: " + t.getMessage());
         }
 
-        // --- LAYER 4: Safety Net: AudioTrack.play() ---
+        // --- LAYER 6: Safety Net: AudioTrack.play() ---
         try {
             XposedHelpers.findAndHookMethod(
                 AudioTrack.class,
@@ -161,17 +384,17 @@ public class XposedInit implements IXposedHookLoadPackage {
                         for (StackTraceElement el : stack) {
                             String cls = el.getClassName();
                             if (cls.contains("mixaudio") || cls.contains("translate.engine")) {
-                                XposedBridge.log(TAG + "Layer 4: Suppressed AudioTrack.play from: " + cls);
-                                param.setResult(null); // Don't play!
+                                XposedBridge.log(TAG + "Layer 6: Suppressed AudioTrack.play from: " + cls);
+                                param.setResult(null);
                                 return;
                             }
                         }
                     }
                 }
             );
-            XposedBridge.log(TAG + "Layer 4: Successfully hooked AudioTrack.play");
+            XposedBridge.log(TAG + "Layer 6: Successfully hooked AudioTrack.play");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Layer 4 error: " + t.getMessage());
+            XposedBridge.log(TAG + "Layer 6 error: " + t.getMessage());
         }
 
         // =========================================================================
