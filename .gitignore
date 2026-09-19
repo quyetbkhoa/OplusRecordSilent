@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+*.class
+*.dex
+*.zip
+bin/
+gen/
+out/
+
+# IDE / OS files
+.idea/
+.vscode/
+*.iml
+*.log
+.DS_Store
+Thumbs.db
