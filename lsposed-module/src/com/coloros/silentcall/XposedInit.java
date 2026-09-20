@@ -411,13 +411,27 @@ public class XposedInit implements IXposedHookLoadPackage {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         String key = (String) param.args[0];
-                        if ("auto_record_switch_status".equals(key)) {
-                            param.setResult(true);
+                        if (key != null) {
+                            if (key.equals("auto_record_switch_status") ||
+                                key.equals("auto_smart_voice_switch_status") ||
+                                key.equals("attachment_function_statement") ||
+                                key.equals("attachment_function_state") ||
+                                key.startsWith("subtitle_statement") ||
+                                key.equals("feedback_permission_status") ||
+                                key.contains("agree_statement") ||
+                                key.contains("agree_privacy")) {
+                                param.setResult(true);
+                            } else if (key.equals("subtitle_is_first_show") ||
+                                       key.equals("subtitle_exp_before_fluid_card_first_show") ||
+                                       key.equals("is_first_launch") ||
+                                       key.equals("is_first_show")) {
+                                param.setResult(false);
+                            }
                         }
                     }
                 }
             );
-            XposedBridge.log(TAG + "Auto-record: Forced auto_record_switch_status to true");
+            XposedBridge.log(TAG + "Auto-record & Statement: Hooked SharedPreferences.getBoolean");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Auto-record boolean hook error: " + t.getMessage());
         }
@@ -433,7 +447,7 @@ public class XposedInit implements IXposedHookLoadPackage {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         String key = (String) param.args[0];
-                        if ("support_apps_auto_record".equals(key)) {
+                        if ("support_apps_auto_record".equals(key) || "support_apps_smart_voice".equals(key)) {
                             String original = (String) param.getResult();
                             if (original != null && original.contains("\"isChecked\":false")) {
                                 String modified = original.replace("\"isChecked\":false", "\"isChecked\":true");
@@ -443,70 +457,60 @@ public class XposedInit implements IXposedHookLoadPackage {
                     }
                 }
             );
-            XposedBridge.log(TAG + "Auto-record: Enabled all apps in support_apps_auto_record");
+            XposedBridge.log(TAG + "Auto-record: Enabled all apps in support_apps_auto_record / support_apps_smart_voice");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Auto-record string hook error: " + t.getMessage());
         }
 
-        // --- Bypass Region, Switch Status, and Enable Status in SmartVoiceDataManger ---
+        // --- Safe Hooks for SmartVoiceDataManger (handle boolean vs LiveData overloads) ---
         try {
             Class<?> dataMgrClass = XposedHelpers.findClassIfExists(
                 "com.coloros.accessibilityassistant.cloud.SmartVoiceDataManger",
                 lpparam.classLoader
             );
             if (dataMgrClass != null) {
-                // 1. Force isRegionSupportSmartVoice to true
-                try {
-                    XposedHelpers.findAndHookMethod(
-                        dataMgrClass,
-                        "isRegionSupportSmartVoice",
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(true);
-                            }
+                for (java.lang.reflect.Method m : dataMgrClass.getDeclaredMethods()) {
+                    String name = m.getName();
+                    Class<?> ret = m.getReturnType();
+                    if ("getAutoSmartVoiceSwitchStatus".equals(name) ||
+                        "getAutoRecordSwitchStatus".equals(name) ||
+                        "getEnableSmartVoiceSwitchStatus".equals(name) ||
+                        "getAutoRecordEnableStatus".equals(name) ||
+                        "getAutoSmartVoiceEnableStatus".equals(name) ||
+                        "isRegionSupportSmartVoice".equals(name) ||
+                        "isSupportSmartVoiceFeature".equals(name) ||
+                        "canShowRecommendCard".equals(name)) {
+
+                        if (ret == boolean.class || ret == Boolean.class) {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    param.setResult(true);
+                                }
+                            });
+                            XposedBridge.log(TAG + "Hooked SmartVoiceDataManger." + name + " (boolean) -> true");
+                        } else if (ret.getName().contains("LiveData") || ret.getName().contains("androidx.lifecycle")) {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                    Object liveData = param.getResult();
+                                    if (liveData != null) {
+                                        try {
+                                            XposedHelpers.callMethod(liveData, "setValue", true);
+                                        } catch (Throwable t) {
+                                            try {
+                                                XposedHelpers.callMethod(liveData, "postValue", true);
+                                            } catch (Throwable ignored) {}
+                                        }
+                                    }
+                                }
+                            });
+                            XposedBridge.log(TAG + "Hooked SmartVoiceDataManger." + name + " (LiveData) -> set value true");
                         }
-                    );
-                    XposedBridge.log(TAG + "Hooked SmartVoiceDataManger.isRegionSupportSmartVoice -> true");
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "Error hooking isRegionSupportSmartVoice: " + t.getMessage());
+                    }
                 }
 
-                // 2. Force getAutoSmartVoiceSwitchStatus to true
-                try {
-                    XposedHelpers.findAndHookMethod(
-                        dataMgrClass,
-                        "getAutoSmartVoiceSwitchStatus",
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(true);
-                            }
-                        }
-                    );
-                    XposedBridge.log(TAG + "Hooked SmartVoiceDataManger.getAutoSmartVoiceSwitchStatus -> true");
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "Error hooking getAutoSmartVoiceSwitchStatus: " + t.getMessage());
-                }
-
-                // 3. Force getAutoSmartVoiceEnableStatus to true
-                try {
-                    XposedHelpers.findAndHookMethod(
-                        dataMgrClass,
-                        "getAutoSmartVoiceEnableStatus",
-                        new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(true);
-                            }
-                        }
-                    );
-                    XposedBridge.log(TAG + "Hooked SmartVoiceDataManger.getAutoSmartVoiceEnableStatus -> true");
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "Error hooking getAutoSmartVoiceEnableStatus: " + t.getMessage());
-                }
-
-                // 4. Ensure all common VoIP apps are in getSmartVoiceAppsAddTT whitelist
+                // Ensure all common VoIP apps are in getSmartVoiceAppsAddTT whitelist
                 try {
                     XC_MethodHook appsHook = new XC_MethodHook() {
                         @Override
@@ -518,7 +522,8 @@ public class XposedInit implements IXposedHookLoadPackage {
                                 String[] commonVoipPkgs = new String[] {
                                     "com.facebook.orca", "com.zing.zalo", "org.telegram.messenger",
                                     "com.whatsapp", "com.viber.voip", "jp.naver.line.android",
-                                    "com.google.android.talk", "com.skype.raider", "com.discord"
+                                    "com.google.android.talk", "com.skype.raider", "com.discord",
+                                    "com.instagram.android", "com.microsoft.teams", "us.zoom.videomeetings"
                                 };
                                 Class<?> switchAppClass = XposedHelpers.findClassIfExists(
                                     "com.coloros.accessibilityassistant.utils.SwitchApp",
@@ -579,7 +584,7 @@ public class XposedInit implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "SmartVoiceDataManger hooks error: " + t.getMessage());
         }
 
-        // --- Bypass Statement Agreement in SubtitlePrefDb.F ---
+        // --- Bypass Statement Agreement in SubtitlePrefDb ---
         try {
             Class<?> prefDbClass = XposedHelpers.findClassIfExists(
                 "com.coloros.accessibilityassistant.repository.SubtitlePrefDb",
@@ -597,9 +602,49 @@ public class XposedInit implements IXposedHookLoadPackage {
                     }
                 );
                 XposedBridge.log(TAG + "Hooked SubtitlePrefDb.F (statement agreement) -> true");
+
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        prefDbClass,
+                        "T",
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(false);
+                            }
+                        }
+                    );
+                    XposedBridge.log(TAG + "Hooked SubtitlePrefDb.T (isFirstShow) -> false");
+                } catch (Throwable ignored) {}
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "SubtitlePrefDb.F hook error: " + t.getMessage());
+            XposedBridge.log(TAG + "SubtitlePrefDb hooks error: " + t.getMessage());
+        }
+
+        // --- Auto-Dismiss PrivacyPolicySettingActivity if Launched ---
+        try {
+            Class<?> privClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.subtitle.callsummary.usernotice.PrivacyPolicySettingActivity",
+                lpparam.classLoader
+            );
+            if (privClass != null) {
+                XposedHelpers.findAndHookMethod(
+                    privClass,
+                    "onCreate",
+                    android.os.Bundle.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            android.app.Activity act = (android.app.Activity) param.thisObject;
+                            act.setResult(android.app.Activity.RESULT_OK);
+                            act.finish();
+                            XposedBridge.log(TAG + "Auto-dismissed PrivacyPolicySettingActivity");
+                        }
+                    }
+                );
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "PrivacyPolicySettingActivity hook error: " + t.getMessage());
         }
 
         // --- Force SwitchApp.isChecked to true ---
