@@ -496,16 +496,12 @@ public class XposedInit implements IXposedHookLoadPackage {
                                     Object liveData = param.getResult();
                                     if (liveData != null) {
                                         try {
-                                            XposedHelpers.callMethod(liveData, "setValue", true);
-                                        } catch (Throwable t) {
-                                            try {
-                                                XposedHelpers.callMethod(liveData, "postValue", true);
-                                            } catch (Throwable ignored) {}
-                                        }
+                                            XposedHelpers.callMethod(liveData, "postValue", true);
+                                        } catch (Throwable ignored) {}
                                     }
                                 }
                             });
-                            XposedBridge.log(TAG + "Hooked SmartVoiceDataManger." + name + " (LiveData) -> set value true");
+                            XposedBridge.log(TAG + "Hooked SmartVoiceDataManger." + name + " (LiveData) -> postValue true");
                         }
                     }
                 }
@@ -621,31 +617,6 @@ public class XposedInit implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "SubtitlePrefDb hooks error: " + t.getMessage());
         }
 
-        // --- Auto-Dismiss PrivacyPolicySettingActivity if Launched ---
-        try {
-            Class<?> privClass = XposedHelpers.findClassIfExists(
-                "com.coloros.accessibilityassistant.subtitle.callsummary.usernotice.PrivacyPolicySettingActivity",
-                lpparam.classLoader
-            );
-            if (privClass != null) {
-                XposedHelpers.findAndHookMethod(
-                    privClass,
-                    "onCreate",
-                    android.os.Bundle.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                            android.app.Activity act = (android.app.Activity) param.thisObject;
-                            act.setResult(android.app.Activity.RESULT_OK);
-                            act.finish();
-                            XposedBridge.log(TAG + "Auto-dismissed PrivacyPolicySettingActivity");
-                        }
-                    }
-                );
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "PrivacyPolicySettingActivity hook error: " + t.getMessage());
-        }
 
         // --- Force SwitchApp.isChecked to true ---
         try {
