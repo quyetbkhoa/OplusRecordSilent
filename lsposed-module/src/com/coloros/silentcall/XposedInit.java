@@ -497,7 +497,9 @@ public class XposedInit implements IXposedHookLoadPackage {
                         "getAutoSmartVoiceEnableStatus".equals(name) ||
                         "isRegionSupportSmartVoice".equals(name) ||
                         "isSupportSmartVoiceFeature".equals(name) ||
-                        "canShowRecommendCard".equals(name)) {
+                        "canShowRecommendCard".equals(name) ||
+                        "checkIsSupportSmartVoice".equals(name) ||
+                        "isInRegin".equals(name)) {
 
                         if (ret == boolean.class || ret == Boolean.class) {
                             XposedBridge.hookMethod(m, new XC_MethodHook() {
@@ -689,18 +691,110 @@ public class XposedInit implements IXposedHookLoadPackage {
             if (utilFClass != null) {
                 for (java.lang.reflect.Method m : utilFClass.getDeclaredMethods()) {
                     if (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class) {
-                        XposedBridge.hookMethod(m, new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                param.setResult(true);
-                            }
-                        });
+                        final String mName = m.getName();
+                        // J = isPowerSaveMode, v = hasDisableCallSummaryFeature, I = isKeyguardLocked
+                        if ("J".equals(mName) || "v".equals(mName) || "I".equals(mName)) {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    param.setResult(false);
+                                }
+                            });
+                            XposedBridge.log(TAG + "Hooked util.f." + mName + " -> false (power save/disable/keyguard bypass)");
+                        } else {
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override
+                                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                    param.setResult(true);
+                                }
+                            });
+                        }
                     }
                 }
-                XposedBridge.log(TAG + "Hooked util.f boolean methods -> true");
+                XposedBridge.log(TAG + "Hooked util.f methods safely");
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "util.f hook error: " + t.getMessage());
+        }
+
+        // --- Hook utils.g (Zen / Breath Mode) & utils.i (Kid Mode) ---
+        try {
+            Class<?> utilsGClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.utils.g",
+                lpparam.classLoader
+            );
+            if (utilsGClass != null) {
+                for (java.lang.reflect.Method m : utilsGClass.getDeclaredMethods()) {
+                    if ("a".equals(m.getName()) && (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class)) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(false); // not in breath/zen mode
+                            }
+                        });
+                        XposedBridge.log(TAG + "Hooked utils.g.a (breath/zen mode) -> false");
+                    } else if ("b".equals(m.getName()) && (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class)) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(true); // in whitelist
+                            }
+                        });
+                        XposedBridge.log(TAG + "Hooked utils.g.b (whitelist) -> true");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "utils.g hook error: " + t.getMessage());
+        }
+
+        try {
+            Class<?> utilsIClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.utils.i",
+                lpparam.classLoader
+            );
+            if (utilsIClass != null) {
+                for (java.lang.reflect.Method m : utilsIClass.getDeclaredMethods()) {
+                    if ("d".equals(m.getName()) && (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class)) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(false); // not in children mode
+                            }
+                        });
+                        XposedBridge.log(TAG + "Hooked utils.i.d (children mode) -> false");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "utils.i hook error: " + t.getMessage());
+        }
+
+        // --- Suppress 'function_not_available_in_current_mode' toast in utils.u ---
+        try {
+            Class<?> utilsUClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.utils.u",
+                lpparam.classLoader
+            );
+            if (utilsUClass != null) {
+                for (java.lang.reflect.Method m : utilsUClass.getDeclaredMethods()) {
+                    if ("n".equals(m.getName()) && m.getParameterTypes().length == 2 && m.getParameterTypes()[0] == int.class) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                int resId = (int) param.args[0];
+                                if (resId == 0x7f11030d) { // function_not_available_in_current_mode
+                                    XposedBridge.log(TAG + "Suppressed toast: function_not_available_in_current_mode (0x7f11030d)");
+                                    param.setResult(null);
+                                }
+                            }
+                        });
+                        XposedBridge.log(TAG + "Hooked utils.u.n to suppress mode error toast");
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "utils.u hook error: " + t.getMessage());
         }
 
         // --- Force SwitchApp.isChecked to true ---
