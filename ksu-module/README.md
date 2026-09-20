@@ -19,12 +19,12 @@ Module root (KernelSU / Magisk / APatch) dành cho ColorOS 16 (Android 16) nhằ
      - Sử dụng `nsenter` để mount đè vào toàn bộ namespace của zygote (`zygote64`, `zygote`) và namespace tiến trình ứng dụng đang chạy.
      - Khởi động lại `com.coloros.accessibilityassistant` để nạp ngay APK mới.
 
-3. **Background Watcher (Tự động đổi tên file [AppName]_[CallerName]_[Timestamp].aac)**:
+3. **Background Watcher (Tự động đổi tên file [AppName]_[CallerName]_[DD.MM.YYYY]_[HH]h[mm].aac)**:
    - Một tiến trình daemon chạy ngầm theo dõi thông báo cuộc gọi đang diễn ra từ các ứng dụng VoIP (Messenger, Zalo, Telegram, WhatsApp...) để ghi nhận tên người gọi.
    - Khi cuộc gọi kết thúc, ColorOS lưu file `.aac` vào `/storage/emulated/0/Music/Recordings/Call Recordings/` sau ~2 giây.
    - Daemon phát hiện file mới, đợi dung lượng file ổn định và tự động đổi tên từ `[AppName]-[YYYYMMDDHHmmss].aac` sang:
-     `[AppName]_[CallerName]_[YYYY-MM-DD_HH-mm-ss].aac`
-     (Ví dụ: `Messenger_Bố_2026-09-20_08-08-54.aac`).
+     `[AppName]_[CallerName]_[DD.MM.YYYY]_[HH]h[mm].aac`
+     (Ví dụ: `Messenger_Bố_20.09.2026_08h08.aac`).
    - Kích hoạt `MEDIA_SCANNER_SCAN_FILE` để bản ghi âm hiển thị tức thì trong ứng dụng Ghi âm hệ thống.
 
 ## Cài đặt

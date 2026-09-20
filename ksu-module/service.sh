@@ -200,14 +200,14 @@ watch_and_rename() {
               continue
             fi
 
-            # Format date: YYYY-MM-DD_HH-mm-ss
+            # Format date: DD.MM.YYYY_HHhMM (e.g. 20.09.2026_08h08)
             y="${ts:0:4}"
             m="${ts:4:2}"
             d="${ts:6:2}"
             H="${ts:8:2}"
             M="${ts:10:2}"
             S="${ts:12:2}"
-            formatted_date="${y}-${m}-${d}_${H}-${M}-${S}"
+            formatted_date="${d}.${m}.${y}_${H}h${M}"
 
             # Determine caller name
             caller=""
@@ -223,6 +223,15 @@ watch_and_rename() {
             fi
 
             target_file="$REC_DIR/$new_name"
+            # Prevent collision if another call occurred in the same minute
+            if [ -f "$target_file" ] && [ "$f" != "$target_file" ]; then
+              if [ -n "$caller" ]; then
+                new_name="${app}_${caller}_${formatted_date}_${S}.aac"
+              else
+                new_name="${app}_${formatted_date}_${S}.aac"
+              fi
+              target_file="$REC_DIR/$new_name"
+            fi
             if [ "$f" != "$target_file" ]; then
               if mv "$f" "$target_file"; then
                 log "Auto-renamed: $fname -> $new_name"
