@@ -60,6 +60,7 @@ OplusRecordSilent/
 ### Đặc điểm & Cơ chế
 - Hoạt động ở tầng kernel / root, hoàn toàn không phụ thuộc vào framework Xposed.
 - Sử dụng cơ chế dual-stage bind mount (`post-fs-data.sh` trước khi zygote khởi chạy + `service.sh` hỗ trợ nsenter zygote & app namespaces) đè APK đã làm rỗng các tệp âm thanh PCM lên `/product/app/ColorAccessibilityAssistant/ColorAccessibilityAssistant.apk`.
+- **Tự động đổi tên file ghi âm VoIP**: Tích hợp daemon chạy ngầm tự động theo dõi tên người gọi từ thông báo VoIP đang diễn ra và tự động đổi tên file sau khi kết thúc cuộc gọi (~2s) sang định dạng `[AppName]_[CallerName]_[YYYY-MM-DD_HH-mm-ss].aac`, đồng bộ tức thì vào ứng dụng Ghi âm hệ thống.
 
 ### Cài đặt
 1. Tải về `silent_ai_call_ksu.zip` từ [Releases](https://github.com/quyetbkhoa/OplusRecordSilent/releases).
