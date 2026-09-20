@@ -87,6 +87,7 @@ log "Restarted com.coloros.accessibilityassistant"
 
 watch_and_rename() {
   local REC_DIR="/storage/emulated/0/Music/Recordings/Call Recordings"
+  local LAST_CALLER_FILE="/data/local/tmp/last_caller.txt"
   log "Starting Call Recordings watcher daemon on $REC_DIR..."
 
   local last_caller=""
@@ -94,160 +95,222 @@ watch_and_rename() {
   local last_call_time=0
 
   while true; do
-    # 1. Track active VoIP call notifications
-    local call_info=$(dumpsys notification --noredact 2>/dev/null | awk '
-      BEGIN { in_pkg=0; in_extras=0; is_call=0; title=""; text=""; found_pkg="" }
-      /NotificationRecord/ {
-        if (in_pkg && is_call && title != "") {
-          print found_pkg "||" title
-          exit
-        }
-        pkg_line = $0
-        in_pkg = ($0 ~ /(pkg=com\.facebook\.orca|pkg=com\.zing\.zalo|pkg=org\.telegram\.messenger|pkg=com\.whatsapp|pkg=com\.tencent\.mm|pkg=com\.instagram\.android|pkg=com\.google\.android\.apps\.tachyon|pkg=com\.skype\.raider|pkg=com\.viber\.voip)/)
-        if (in_pkg) {
-          match(pkg_line, /pkg=[^ ]+/)
-          found_pkg = substr(pkg_line, RSTART + 4, RLENGTH - 4)
-        }
-        is_call = ($0 ~ /category=call/ || $0 ~ /channel=.*(call|voip)/)
+    # 1. Track active VoIP call notifications using verified awk parser
+    local notif_info=$(dumpsys notification --noredact 2>/dev/null | awk '
+      BEGIN {
+        in_list = 0
+        in_rec = 0
         in_extras = 0
+        pkg = ""
+        app = ""
+        is_call = 0
         title = ""
         text = ""
+        convo = ""
       }
-      in_pkg && /extras=\{/ { in_extras = 1 }
-      in_pkg && in_extras && /android\.title=String \(/ {
-        t = $0
-        sub(/.*android\.title=String \(/, "", t)
-        sub(/\).*/, "", t)
-        title = t
-      }
-      in_pkg && in_extras && /android\.text=String \(/ {
-        tx = $0
-        sub(/.*android\.text=String \(/, "", tx)
-        sub(/\).*/, "", tx)
-        text = tx
-        if (text ~ /(call|Call|gọi|Gọi|Đang gọi|đang gọi|thoại|Thoại|video|Video)/) {
+      /Notification List:/ { in_list = 1 }
+      /mStatsArrays/ { in_list = 0 }
+      in_list && /NotificationRecord\(/ {
+        if (in_rec && is_call && pkg != "") {
+          print pkg "||" app "||" title "||" text "||" convo
+        }
+        in_rec = 0
+        in_extras = 0
+        pkg = ""
+        app = ""
+        is_call = 0
+        title = ""
+        text = ""
+        convo = ""
+        line = $0
+        if (line ~ /pkg=com\.facebook\.orca/) { pkg = "com.facebook.orca"; app = "Messenger"; in_rec = 1 }
+        else if (line ~ /pkg=com\.zing\.zalo/) { pkg = "com.zing.zalo"; app = "Zalo"; in_rec = 1 }
+        else if (line ~ /pkg=org\.telegram\.messenger/) { pkg = "org.telegram.messenger"; app = "Telegram"; in_rec = 1 }
+        else if (line ~ /pkg=com\.whatsapp/) { pkg = "com.whatsapp"; app = "WhatsApp"; in_rec = 1 }
+        else if (line ~ /pkg=com\.tencent\.mm/) { pkg = "com.tencent.mm"; app = "WeChat"; in_rec = 1 }
+        else if (line ~ /pkg=com\.viber\.voip/) { pkg = "com.viber.voip"; app = "Viber"; in_rec = 1 }
+        else if (line ~ /pkg=com\.skype\.raider/) { pkg = "com.skype.raider"; app = "Skype"; in_rec = 1 }
+        else if (line ~ /pkg=com\.google\.android\.apps\.tachyon/) { pkg = "com.google.android.apps.tachyon"; app = "Meet"; in_rec = 1 }
+        if (in_rec && (line ~ /flags=.*(ONGOING_EVENT|FOREGROUND_SERVICE)/ || line ~ /category=call/)) {
           is_call = 1
         }
       }
+      in_rec && /flags=.*(ONGOING_EVENT|FOREGROUND_SERVICE)/ { is_call = 1 }
+      in_rec && /category=call/ { is_call = 1 }
+      in_rec && /extras=\{/ { in_extras = 1 }
+      in_rec && in_extras && /android\.title=String \(/ {
+        t = $0
+        sub(/.*android\.title=String \(/, "", t)
+        sub(/\)[ ]*$/, "", t)
+        title = t
+      }
+      in_rec && in_extras && /android\.text=(String|SpannableString) \(/ {
+        tx = $0
+        sub(/.*android\.text=(String|SpannableString) \(/, "", tx)
+        sub(/\)[ ]*$/, "", tx)
+        text = tx
+      }
+      in_rec && in_extras && /android\.conversationTitle=String \(/ {
+        c = $0
+        sub(/.*android\.conversationTitle=String \(/, "", c)
+        sub(/\)[ ]*$/, "", c)
+        convo = c
+      }
       END {
-        if (in_pkg && is_call && title != "") {
-          print found_pkg "||" title
+        if (in_rec && is_call && pkg != "") {
+          print pkg "||" app "||" title "||" text "||" convo
         }
       }
     ')
 
-    if [ -n "$call_info" ]; then
-      local cur_pkg="${call_info%%||*}"
-      local cur_title="${call_info#*||}"
+    if [ -n "$notif_info" ]; then
+      local n_pkg=$(echo "$notif_info" | awk -F '||' '{print $1}')
+      local n_app=$(echo "$notif_info" | awk -F '||' '{print $2}')
+      local n_title=$(echo "$notif_info" | awk -F '||' '{print $3}')
+      local n_text=$(echo "$notif_info" | awk -F '||' '{print $4}')
+      local n_convo=$(echo "$notif_info" | awk -F '||' '{print $5}')
 
-      case "$cur_title" in
-        *"Đang gọi"*|*"Cuộc gọi"*|*"Calling"*|*"Incoming"*|*"Voice call"*|*"Video call"*)
-          ;;
-        *)
-          local mapped_app=""
-          case "$cur_pkg" in
-            "com.facebook.orca") mapped_app="Messenger" ;;
-            "com.zing.zalo") mapped_app="Zalo" ;;
-            "org.telegram.messenger"*) mapped_app="Telegram" ;;
-            "com.whatsapp"*) mapped_app="WhatsApp" ;;
-            "com.instagram.android") mapped_app="Instagram" ;;
-            "com.tencent.mm") mapped_app="WeChat" ;;
-            "com.google.android.apps.tachyon") mapped_app="GoogleMeet" ;;
-            "com.skype.raider") mapped_app="Skype" ;;
-            "com.viber.voip") mapped_app="Viber" ;;
-            *) mapped_app="" ;;
-          esac
+      # Extract caller name by checking candidates in order
+      local extracted=""
+      for cand in "$n_title" "$n_convo" "$n_text"; do
+        [ -z "$cand" ] && continue
+        local c="$cand"
+        # Strip common call prefixes
+        case "$c" in
+          [Đđ]"ang gọi cho "*) c="${c#*ang gọi cho }" ;;
+          [Đđ]"ang gọi "*) c="${c#*ang gọi }" ;;
+          [Cc]"uộc gọi đến từ "*) c="${c#*uộc gọi đến từ }" ;;
+          [Cc]"uộc gọi đến: "*) c="${c#*uộc gọi đến: }" ;;
+          [Cc]"uộc gọi đến "*) c="${c#*uộc gọi đến }" ;;
+          [Cc]"uộc gọi từ "*) c="${c#*uộc gọi từ }" ;;
+          [Cc]"uộc gọi với "*) c="${c#*uộc gọi với }" ;;
+          [Cc]"uộc gọi "*) c="${c#*uộc gọi }" ;;
+          "Calling "*) c="${c#Calling }" ;;
+          "Call with "*) c="${c#Call with }" ;;
+          "Incoming call from "*) c="${c#Incoming call from }" ;;
+          "Incoming call: "*) c="${c#Incoming call: }" ;;
+        esac
 
-          if [ -n "$mapped_app" ] && [ -n "$cur_title" ]; then
-            cur_title=$(echo "$cur_title" | tr -d '\r\n\t' | sed -e 's/[\\/:*?"<>|]/_/g' -e 's/^[ _]*//' -e 's/[ _]*$//')
-            if [ -n "$cur_title" ]; then
-              last_caller="$cur_title"
-              last_caller_app="$mapped_app"
-              last_call_time=$(date +%s)
-            fi
-          fi
-          ;;
-      esac
+        c=$(echo "$c" | tr -d '\r\n\t' | sed -e 's/[\\/:*?"<>|]/_/g' -e 's/^[ _]*//' -e 's/[ _]*$//')
+        local c_lower=$(echo "$c" | tr '[:upper:]' '[:lower:]')
+        case "$c_lower" in
+          ""|"$n_app"|"messenger"|"zalo"|"telegram"|"whatsapp"|"wechat"|"viber"|"skype"|"meet"|\
+          "cuộc gọi"|"cuộc gọi đến"|"cuộc gọi đi"|"cuộc gọi thoại"|"cuộc gọi video"|\
+          "đang gọi"|"calling"|"incoming call"|"outgoing call"|"ongoing call"|\
+          "voice call"|"video call"|"tin nhắn"|"chat")
+            ;;
+          *)
+            extracted="$c"
+            break
+            ;;
+        esac
+      done
+
+      if [ -n "$extracted" ] && [ -n "$n_app" ]; then
+        last_caller="$extracted"
+        last_caller_app="$n_app"
+        last_call_time=$(date +%s)
+        # Write to shared tmp file for LSPosed to read immediately
+        echo "${n_app}|${extracted}|$(date +%s000)" > "$LAST_CALLER_FILE"
+        chmod 666 "$LAST_CALLER_FILE" 2>/dev/null
+        log "Active VoIP call: app=$n_app, caller=$extracted"
+      fi
     fi
 
     # 2. Check for completed VoIP call recordings in Call Recordings directory
     if [ -d "$REC_DIR" ]; then
-      for f in "$REC_DIR"/*-*.aac; do
+      local now=$(date +%s)
+
+      # Case A: Default ColorOS format: AppName-YYYYMMDDHHmmss.aac
+      for f in "$REC_DIR"/*-??????????????.aac; do
         [ -f "$f" ] || continue
-
         fname="${f##*/}"
-        # Strictly match ColorOS default VoIP format: AppName-YYYYMMDDHHmmss.aac
-        case "$fname" in
-          *-??????????????.aac)
-            app="${fname%%-*}"
-            rest="${fname#*-}"
-            ts="${rest%.aac}"
+        app="${fname%%-*}"
+        rest="${fname#*-}"
+        ts="${rest%.aac}"
 
-            # Ensure ts is exactly 14 digits
-            case "$ts" in
-              [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
-                ;;
-              *)
-                continue
-                ;;
-            esac
-
-            # Verify file write is finished (size unchanged after 2s)
-            size1=$(stat -c %s "$f" 2>/dev/null || echo 0)
-            sleep 2
-            size2=$(stat -c %s "$f" 2>/dev/null || echo 0)
-            if [ "$size1" -ne "$size2" ] || [ "$size2" -eq 0 ]; then
-              continue
-            fi
-
-            # Format date: DD.MM.YYYY_HHhMM (e.g. 20.09.2026_08h08)
-            y="${ts:0:4}"
-            m="${ts:4:2}"
-            d="${ts:6:2}"
-            H="${ts:8:2}"
-            M="${ts:10:2}"
-            S="${ts:12:2}"
-            formatted_date="${d}.${m}.${y}_${H}h${M}"
-
-            # Determine caller name
-            caller=""
-            now=$(date +%s)
-            if [ "$app" = "$last_caller_app" ] && [ $((now - last_call_time)) -le 120 ]; then
-              caller="$last_caller"
-            fi
-
-            if [ -n "$caller" ]; then
-              new_name="${app}_${caller}_${formatted_date}.aac"
-            else
-              new_name="${app}_${formatted_date}.aac"
-            fi
-
-            target_file="$REC_DIR/$new_name"
-            # Prevent collision if another call occurred in the same minute
-            if [ -f "$target_file" ] && [ "$f" != "$target_file" ]; then
-              if [ -n "$caller" ]; then
-                new_name="${app}_${caller}_${formatted_date}_${S}.aac"
-              else
-                new_name="${app}_${formatted_date}_${S}.aac"
-              fi
-              target_file="$REC_DIR/$new_name"
-            fi
-            if [ "$f" != "$target_file" ]; then
-              if mv "$f" "$target_file"; then
-                log "Auto-renamed: $fname -> $new_name"
-                # Update MediaStore so SoundRecorder sees it immediately
-                am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$target_file" >/dev/null 2>&1
-                am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$f" >/dev/null 2>&1
-              else
-                log "Failed to rename: $fname -> $new_name"
-              fi
-            fi
-            ;;
+        case "$ts" in
+          [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+          *) continue ;;
         esac
+
+        # Verify file write is finished
+        size1=$(stat -c %s "$f" 2>/dev/null || echo 0)
+        sleep 2
+        size2=$(stat -c %s "$f" 2>/dev/null || echo 0)
+        if [ "$size1" -ne "$size2" ] || [ "$size2" -eq 0 ]; then
+          continue
+        fi
+
+        y="${ts:0:4}"; m="${ts:4:2}"; d="${ts:6:2}"; H="${ts:8:2}"; M="${ts:10:2}"; S="${ts:12:2}"
+        formatted_date="${d}.${m}.${y}_${H}h${M}"
+
+        caller=""
+        if [ "$app" = "$last_caller_app" ] && [ $((now - last_call_time)) -le 180 ]; then
+          caller="$last_caller"
+        elif [ -f "$LAST_CALLER_FILE" ]; then
+          f_caller=$(cut -d'|' -f2 "$LAST_CALLER_FILE" 2>/dev/null)
+          [ -n "$f_caller" ] && caller="$f_caller"
+        fi
+
+        if [ -n "$caller" ]; then
+          new_name="${app}_${caller}_${formatted_date}.aac"
+        else
+          new_name="${app}_${formatted_date}.aac"
+        fi
+
+        target_file="$REC_DIR/$new_name"
+        if [ -f "$target_file" ] && [ "$f" != "$target_file" ]; then
+          if [ -n "$caller" ]; then
+            new_name="${app}_${caller}_${formatted_date}_${S}.aac"
+          else
+            new_name="${app}_${formatted_date}_${S}.aac"
+          fi
+          target_file="$REC_DIR/$new_name"
+        fi
+
+        if [ "$f" != "$target_file" ]; then
+          if mv "$f" "$target_file"; then
+            log "Auto-renamed: $fname -> $new_name"
+            am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$target_file" >/dev/null 2>&1
+            am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$f" >/dev/null 2>&1
+          fi
+        fi
+      done
+
+      # Case B: LSPosed format without caller: AppName_DD.MM.YYYY_HHhMM.aac
+      for f in "$REC_DIR"/*_??.??.????_??h??.aac; do
+        [ -f "$f" ] || continue
+        fname="${f##*/}"
+        # Check if there is only one underscore before date (i.e. no caller)
+        # Format: App_DD.MM.YYYY_HHhMM.aac
+        app="${fname%%_*}"
+        rest="${fname#*_}"
+        formatted_date="${rest%.aac}"
+
+        caller=""
+        if [ "$app" = "$last_caller_app" ] && [ $((now - last_call_time)) -le 180 ]; then
+          caller="$last_caller"
+        elif [ -f "$LAST_CALLER_FILE" ]; then
+          f_caller=$(cut -d'|' -f2 "$LAST_CALLER_FILE" 2>/dev/null)
+          [ -n "$f_caller" ] && caller="$f_caller"
+        fi
+
+        if [ -n "$caller" ]; then
+          new_name="${app}_${caller}_${formatted_date}.aac"
+          target_file="$REC_DIR/$new_name"
+          if [ "$f" != "$target_file" ]; then
+            if mv "$f" "$target_file"; then
+              log "Auto-renamed (added caller): $fname -> $new_name"
+              am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$target_file" >/dev/null 2>&1
+              am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://$f" >/dev/null 2>&1
+            fi
+          fi
+        fi
       done
     fi
 
-    sleep 2
+    sleep 1
   done
 }
 

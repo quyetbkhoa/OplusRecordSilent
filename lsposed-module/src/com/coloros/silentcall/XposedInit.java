@@ -11,9 +11,11 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
@@ -409,6 +411,9 @@ public class XposedInit implements IXposedHookLoadPackage {
                                         caller = nickName;
                                     }
                                 }
+                                if (caller == null || caller.trim().isEmpty()) {
+                                    caller = readLastCallerFromTmp(appName);
+                                }
 
                                 long timestamp = (Long) param.args[1];
                                 if (timestamp <= 0) timestamp = System.currentTimeMillis();
@@ -439,6 +444,31 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "GlobalSummaryInfo hook error: " + t.getMessage());
         }
+    }
+
+    private static String readLastCallerFromTmp(String appName) {
+        File f = new File("/data/local/tmp/last_caller.txt");
+        if (!f.exists() || !f.canRead()) return null;
+        try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+            String line = br.readLine();
+            if (line != null && !line.trim().isEmpty()) {
+                String[] parts = line.trim().split("\\|", 3);
+                if (parts.length >= 3) {
+                    String fileApp = parts[0];
+                    String fileCaller = parts[1];
+                    long timestamp = Long.parseLong(parts[2]);
+                    if (Math.abs(System.currentTimeMillis() - timestamp) < 180000) { // 3 minutes
+                        if (appName == null || fileApp.isEmpty() || fileApp.equalsIgnoreCase(appName)) {
+                            XposedBridge.log(TAG + "Found caller from /data/local/tmp/last_caller.txt: " + fileCaller);
+                            return fileCaller;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "readLastCallerFromTmp error: " + t.getMessage());
+        }
+        return null;
     }
 
     private static String sanitize(String name) {
