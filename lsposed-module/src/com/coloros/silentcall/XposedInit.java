@@ -1,7 +1,9 @@
 package com.coloros.silentcall;
 
+import android.app.Notification;
 import android.content.res.AssetManager;
 import android.media.AudioTrack;
+import android.service.notification.StatusBarNotification;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -12,7 +14,10 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Date;
+import java.util.Locale;
 
 public class XposedInit implements IXposedHookLoadPackage {
     private static final String TAG = "[SilentAICall] ";
@@ -280,5 +285,164 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "SwitchApp hook error: " + t.getMessage());
         }
+
+        // =========================================================================
+        // 7. AUTOMATIC FILE RENAMING: [AppName]_[CallerName]_[DD.MM.YYYY]_[HH]h[mm].aac
+        // =========================================================================
+
+        // A. Capture caller name from notifications when UserNameNotificationListenerService is active
+        try {
+            Class<?> listenerClass = XposedHelpers.findClassIfExists(
+                "com.coloros.translate.UserNameNotificationListenerService",
+                lpparam.classLoader
+            );
+            if (listenerClass != null) {
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        listenerClass,
+                        "canUpdateUserName",
+                        String.class,
+                        StatusBarNotification.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(true);
+                            }
+                        }
+                    );
+                } catch (Throwable ignored) {}
+
+                try {
+                    XposedHelpers.findAndHookMethod(
+                        listenerClass,
+                        "updateUserName",
+                        StatusBarNotification.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                StatusBarNotification sbn = (StatusBarNotification) param.args[0];
+                                if (sbn == null) return;
+                                String pkg = sbn.getPackageName();
+                                Notification n = sbn.getNotification();
+                                if (n == null || n.extras == null) return;
+
+                                CharSequence titleCs = n.extras.getCharSequence(Notification.EXTRA_TITLE);
+                                if (titleCs == null) {
+                                    titleCs = n.extras.getCharSequence("android.title");
+                                }
+                                if (titleCs != null) {
+                                    String title = titleCs.toString().trim();
+                                    if (!title.isEmpty()) {
+                                        if (title.contains("Đang gọi") || title.contains("Cuộc gọi") ||
+                                            title.contains("Calling") || title.contains("Incoming") ||
+                                            title.contains("Voice call") || title.contains("Video call")) {
+                                            return;
+                                        }
+                                        try {
+                                            Class<?> mgr = XposedHelpers.findClassIfExists("com.coloros.translate.a", lpparam.classLoader);
+                                            if (mgr != null) {
+                                                XposedHelpers.callStaticMethod(mgr, "e", pkg, title);
+                                                XposedBridge.log(TAG + "Captured VoIP caller from notification: " + pkg + " -> " + title);
+                                            }
+                                        } catch (Throwable t) {
+                                            XposedBridge.log(TAG + "Error storing in ThirdAppUserNameManager: " + t.getMessage());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    );
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "UserNameNotificationListenerService hook error: " + t.getMessage());
+        }
+
+        // B. Hook GlobalSummaryInfo.getFormatSaveFileName to format as [AppName]_[CallerName]_[DD.MM.YYYY]_[HH]h[mm].aac
+        try {
+            Class<?> summaryInfoClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.subtitle.globalsummary.GlobalSummaryInfo",
+                lpparam.classLoader
+            );
+            if (summaryInfoClass != null) {
+                XposedHelpers.findAndHookMethod(
+                    summaryInfoClass,
+                    "getFormatSaveFileName",
+                    String.class,
+                    long.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            try {
+                                String original = (String) param.getResult();
+                                if (original == null) return;
+
+                                String appName = null;
+                                String pkgName = null;
+                                String nickName = null;
+                                try {
+                                    appName = (String) XposedHelpers.callMethod(param.thisObject, "getAppName");
+                                } catch (Throwable ignored) {}
+                                try {
+                                    pkgName = (String) XposedHelpers.callMethod(param.thisObject, "getCallPackageName");
+                                } catch (Throwable ignored) {}
+                                try {
+                                    nickName = (String) XposedHelpers.callMethod(param.thisObject, "getNickName");
+                                } catch (Throwable ignored) {}
+
+                                // Only customize VoIP calls (where appName is present)
+                                if (appName == null || appName.trim().isEmpty()) {
+                                    return;
+                                }
+
+                                String caller = null;
+                                if (pkgName != null && !pkgName.trim().isEmpty()) {
+                                    try {
+                                        Class<?> mgr = XposedHelpers.findClassIfExists("com.coloros.translate.a", lpparam.classLoader);
+                                        if (mgr != null) {
+                                            caller = (String) XposedHelpers.callStaticMethod(mgr, "b", pkgName);
+                                        }
+                                    } catch (Throwable ignored) {}
+                                }
+                                if (caller == null || caller.trim().isEmpty()) {
+                                    if (nickName != null && !nickName.trim().isEmpty()) {
+                                        caller = nickName;
+                                    }
+                                }
+
+                                long timestamp = (Long) param.args[1];
+                                if (timestamp <= 0) timestamp = System.currentTimeMillis();
+
+                                SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy_HH'h'mm", Locale.getDefault());
+                                String dateStr = sdf.format(new Date(timestamp));
+                                String ext = (param.args[0] != null && !((String) param.args[0]).isEmpty())
+                                    ? (String) param.args[0] : "aac";
+
+                                String safeApp = sanitize(appName);
+                                String newName;
+                                if (caller != null && !caller.trim().isEmpty()) {
+                                    String safeCaller = sanitize(caller);
+                                    newName = safeApp + "_" + safeCaller + "_" + dateStr + "." + ext;
+                                } else {
+                                    newName = safeApp + "_" + dateStr + "." + ext;
+                                }
+                                XposedBridge.log(TAG + "getFormatSaveFileName: [" + original + "] -> [" + newName + "]");
+                                param.setResult(newName);
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "getFormatSaveFileName hook error: " + t.getMessage());
+                            }
+                        }
+                    }
+                );
+                XposedBridge.log(TAG + "Hooked GlobalSummaryInfo.getFormatSaveFileName for custom naming");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "GlobalSummaryInfo hook error: " + t.getMessage());
+        }
+    }
+
+    private static String sanitize(String name) {
+        if (name == null) return "";
+        return name.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
     }
 }
