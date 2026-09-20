@@ -412,26 +412,44 @@ public class XposedInit implements IXposedHookLoadPackage {
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         String key = (String) param.args[0];
                         if (key != null) {
-                            if (key.equals("auto_record_switch_status") ||
-                                key.equals("auto_smart_voice_switch_status") ||
-                                key.equals("attachment_function_statement") ||
-                                key.equals("attachment_function_state") ||
-                                key.startsWith("subtitle_statement") ||
-                                key.equals("feedback_permission_status") ||
-                                key.contains("agree_statement") ||
-                                key.contains("agree_privacy")) {
+                            if (key.contains("statement") ||
+                                key.contains("agreement") ||
+                                key.contains("agree") ||
+                                key.contains("auto_record") ||
+                                key.contains("smart_voice") ||
+                                key.contains("attachment") ||
+                                key.equals("feedback_permission_status")) {
                                 param.setResult(true);
-                            } else if (key.equals("subtitle_is_first_show") ||
-                                       key.equals("subtitle_exp_before_fluid_card_first_show") ||
-                                       key.equals("is_first_launch") ||
-                                       key.equals("is_first_show")) {
+                            } else if (key.contains("first_show") ||
+                                       key.contains("first_launch") ||
+                                       key.contains("is_first")) {
                                 param.setResult(false);
                             }
                         }
                     }
                 }
             );
-            XposedBridge.log(TAG + "Auto-record & Statement: Hooked SharedPreferences.getBoolean");
+
+            XposedHelpers.findAndHookMethod(
+                "android.app.SharedPreferencesImpl",
+                lpparam.classLoader,
+                "contains",
+                String.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        String key = (String) param.args[0];
+                        if (key != null && (key.contains("statement") ||
+                                            key.contains("agreement") ||
+                                            key.contains("auto_record") ||
+                                            key.contains("smart_voice") ||
+                                            key.contains("attachment"))) {
+                            param.setResult(true);
+                        }
+                    }
+                }
+            );
+            XposedBridge.log(TAG + "Auto-record & Statement: Hooked SharedPreferences getBoolean & contains");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Auto-record boolean hook error: " + t.getMessage());
         }
@@ -617,6 +635,73 @@ public class XposedInit implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "SubtitlePrefDb hooks error: " + t.getMessage());
         }
 
+
+        // --- Bypass Privacy Security Policy & Statement Checks ---
+        try {
+            Class<?> secPolicyClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.base.statement.PrivacySecurityPolicyManager",
+                lpparam.classLoader
+            );
+            if (secPolicyClass != null) {
+                for (java.lang.reflect.Method m : secPolicyClass.getDeclaredMethods()) {
+                    if (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(true);
+                            }
+                        });
+                    }
+                }
+                XposedBridge.log(TAG + "Hooked PrivacySecurityPolicyManager boolean methods -> true");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "PrivacySecurityPolicyManager hook error: " + t.getMessage());
+        }
+
+        try {
+            Class<?> aigcPolicyClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.subtitle.callsummary.usernotice.AigcPrivacyPolicyManager",
+                lpparam.classLoader
+            );
+            if (aigcPolicyClass != null) {
+                for (java.lang.reflect.Method m : aigcPolicyClass.getDeclaredMethods()) {
+                    if (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(true);
+                            }
+                        });
+                    }
+                }
+                XposedBridge.log(TAG + "Hooked AigcPrivacyPolicyManager boolean methods -> true");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "AigcPrivacyPolicyManager hook error: " + t.getMessage());
+        }
+
+        try {
+            Class<?> utilFClass = XposedHelpers.findClassIfExists(
+                "com.coloros.accessibilityassistant.subtitle.callsummary.util.f",
+                lpparam.classLoader
+            );
+            if (utilFClass != null) {
+                for (java.lang.reflect.Method m : utilFClass.getDeclaredMethods()) {
+                    if (m.getReturnType() == boolean.class || m.getReturnType() == Boolean.class) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                param.setResult(true);
+                            }
+                        });
+                    }
+                }
+                XposedBridge.log(TAG + "Hooked util.f boolean methods -> true");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "util.f hook error: " + t.getMessage());
+        }
 
         // --- Force SwitchApp.isChecked to true ---
         try {
