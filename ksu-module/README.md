@@ -1,23 +1,33 @@
-# Silent AI Call - KernelSU / Magisk / APatch Module
+# Silent AI Call - KernelSU / Magisk / APatch Module (v1.0.1)
 
-Module root (KernelSU / Magisk / APatch) dành cho ColorOS 16 nhằm tắt thông báo âm thanh ghi âm và tự động đổi tên file ghi âm cuộc gọi VoIP.
+Module root (KernelSU / Magisk / APatch) dành cho ColorOS 16 (Android 16) nhằm loại bỏ hoàn toàn âm thanh thông báo cảnh báo ghi âm ("Cuộc gọi này đang được ghi âm / The session is being recorded").
 
 ## Cơ chế hoạt động
 
-1. **Bind Mount Silent APK**:
-   - `service.sh` thực hiện mount đè tệp `ColorAccessibilityAssistant_silent.apk` (đã làm rỗng các file PCM phát âm thanh cảnh báo) lên `/product/app/ColorAccessibilityAssistant/ColorAccessibilityAssistant.apk` trên cả global namespace và toàn bộ namespace của zygote (`zygote64`, `zygote`).
-2. **Kích hoạt NotificationListenerService**:
-   - Cấp quyền `WRITE_SECURE_SETTINGS` và tự động kích hoạt dịch vụ lắng nghe thông báo `UserNameNotificationListenerService` của ColorOS để lấy tên người gọi từ thông báo VoIP (Messenger, Zalo, Telegram...).
-3. **Background Watcher (Trình giám sát đổi tên tự động)**:
-   - Một tiến trình daemon chạy ngầm theo dõi thư mục `/storage/emulated/0/Music/Recordings/Call Recordings/`.
-   - Khi phát hiện tệp ghi âm mới hoàn thành, daemon tự động truy vấn tên người gọi đang đàm thoại từ `dumpsys notification` và đổi tên tệp theo định dạng:
-     `[AppName]_[CallerName]_[YYYY-MM-DD_HH-mm-ss].aac`
-   - Kích hoạt `MEDIA_SCANNER_SCAN_FILE` để bản ghi âm hiển thị tức thì trong ứng dụng Ghi âm hệ thống.
+1. **Patched APK (Zeroed PCM Prompts)**:
+   - Tệp `ColorAccessibilityAssistant_silent.apk` được xử lý làm rỗng (0 bytes) toàn bộ các tệp âm thanh thông báo trong `assets/mix/`:
+     - `assets/mix/record_en_US.pcm`
+     - `assets/mix/subtitle_en_US.pcm`
+     - `assets/mix/summary_en_US.pcm`
+   - Khi hệ thống thực hiện ghi âm cuộc gọi, trình phát âm thanh `AudioMixer` mở tệp PCM 0-byte và kết thúc ngay lập tức mà không phát ra bất kỳ âm thanh nào.
 
-## Đóng gói module
+2. **Dual-Stage Bind Mount**:
+   - **Giai đoạn 1 (`post-fs-data.sh`)**: Chạy sớm ngay khi các phân vùng `/product`, `/system` vừa mount, trước khi `zygote` khởi chạy. Thực hiện bind mount sớm để mọi tiến trình con kế thừa namespace tự động.
+   - **Giai đoạn 2 (`service.sh`)**: Chạy sau khi máy hoàn tất khởi động (`sys.boot_completed=1`):
+     - Tự động nhận diện đường dẫn thực tế của ứng dụng qua `pm path com.coloros.accessibilityassistant` và quét các phân vùng (`/product`, `/my_product`, `/system_ext`...).
+     - Áp dụng bind mount trên global namespace.
+     - Sử dụng `nsenter` để mount đè vào toàn bộ namespace của zygote (`zygote64`, `zygote`) và namespace tiến trình ứng dụng đang chạy.
+     - Khởi động lại `com.coloros.accessibilityassistant` để nạp ngay APK mới.
 
-Để đóng gói thành file zip cài đặt trong KernelSU / Magisk Manager:
+## Cài đặt
+
+1. Tải về `silent_ai_call_ksu.zip` từ trang Releases.
+2. Mở KernelSU / Magisk / APatch App -> Chọn **Modules** -> **Install from storage** -> chọn file zip.
+3. Khởi động lại thiết bị.
+
+## Đóng gói thủ công (Dành cho nhà phát triển)
+
 ```bash
 python build.py
 ```
-File đầu ra: `silent_ai_call_ksu.zip`.
+Tệp đầu ra: `silent_ai_call_ksu.zip`.

@@ -1,34 +1,31 @@
-# SilentAICall - LSPosed Module for ColorOS 16 / Android 16
+# SilentAICall - LSPosed Module for ColorOS 16 / Android 16 (v1.0.1)
 
 Module LSPosed (hỗ trợ Zygisk LSPosed, JingMatrix Vector v2.2+, v.v.) chuyên dụng cho ColorOS 16 (OPPO Find X7 Ultra, OnePlus 12, Realme GT5 Pro...).
 
-## Tính năng chính
+## Cơ chế hoạt động (v1.0.1)
 
-1. **Tắt hoàn toàn âm thanh thông báo ghi âm (Announcement Silencing - 4 Layers)**:
-   - **Layer 1**: Hook `com.coloros.translate.engine.mixaudio.a.e` - Chặn phát âm thanh và giả lập callback `onPlayComplete`.
-   - **Layer 2**: Hook `com.coloros.translate.engine.mixaudio.mix.a.e` - Chặn worker player trực tiếp.
-   - **Layer 3**: Hook `com.coloros.translate.engine.mixaudio.mix.c.d` - Chặn luồng Downlink PCM player.
-   - **Layer 4**: Hook `AudioTrack.play()` - Lưới an toàn lọc theo Call Stack chặn mọi lệnh `play()` từ package `mixaudio` / `translate.engine`.
+Phiên bản 1.0.1 áp dụng triết lý **Audio File Prompt Interception** sạch và an toàn tuyệt đối, không can thiệp sâu vào state machine hay logic nghiệp vụ của ColorOS:
 
-2. **Bắt buộc tự động ghi âm VoIP (Auto-Record & Bypass All Checks)**:
-   - Bypass kiểm tra vùng (`SmartVoiceDataManger.isRegionSupportSmartVoice` -> `true`).
-   - Bypass điều khoản bảo mật (`SubtitlePrefDb.F` -> `true`).
-   - Ép bật công tắc tự động ghi âm (`auto_record_switch_status` & `SmartVoiceDataManger.getAutoSmartVoiceSwitchStatus` -> `true`).
-   - Mở rộng whitelist ứng dụng VoIP (`getSmartVoiceAppsAddTT` & `getSmartVoiceApps` -> bổ sung Facebook Messenger, Zalo, Telegram, WhatsApp, Viber, LINE, Google Meet, Skype, Discord...).
-   - Ép trạng thái checked của ứng dụng (`SwitchApp.isChecked` -> `true`).
+1. **Làm rỗng tệp âm thanh thông báo (Audio Prompt Silencing)**:
+   - **AssetManager Interception**: Hook `AssetManager.open()` khi ứng dụng mở các tệp `mix/*.pcm` (`record_en_US.pcm`, `subtitle_en_US.pcm`, `summary_en_US.pcm`), trả về `ByteArrayInputStream` rỗng (0 bytes).
+   - **FileInputStream Redirection**: Tự động tạo tệp `silent_prompt.pcm` (0 bytes) trong cache của ứng dụng và chuyển hướng mọi truy vấn đọc tệp từ `/system_ext/etc/recording-prompt/` hoặc `mix/*.pcm` về tệp rỗng này.
+   - **AudioFileManager Hook**: Hook các hàm lấy đường dẫn tệp âm thanh trong `AudioFileManager` (`b4.a.a` và `b4.a.b`), luôn trả về tệp rỗng `silent_prompt.pcm`.
+   - **AudioMixer Engine Hook**: Chuyển hướng `audioFile` trong `AudioMixer.playAudioData` (`com.coloros.translate.engine.mixaudio.mix.a.e`) về tệp rỗng.
+   - **AudioTrack Safety Net**: Hook `AudioTrack.write()` xóa sạch buffer PCM nếu phát hiện luồng phát âm thông báo.
 
-3. **Mở khóa thông báo "Đã lưu bản ghi âm" (Unblock Saved Recording Notifications)**:
-   - Kênh cũ `start_record_channel_id` bị hệ thống khóa (`mImportance = 0`) được tự động chuyển tiếp sang kênh `call_record_channel_v2` với độ ưu tiên cao (`IMPORTANCE_HIGH`), đảm bảo hiển thị banner và thông báo lên thanh trạng thái.
+2. **Bật tự động ghi âm an toàn (Safe Auto-Record)**:
+   - Hook cấu hình danh sách ứng dụng được hỗ trợ (`support_apps_auto_record`, `support_apps_smart_voice`), tự động chuyển cờ `"isChecked": false` thành `true`.
+   - Hook `SwitchApp.isChecked()` luôn trả về `true` cho các ứng dụng VoIP (Messenger, Zalo, Telegram, WhatsApp, v.v.).
 
-4. **Tự động nhận diện người gọi và đổi tên file ghi âm (Auto-Rename)**:
-   - Thu thập tên người gọi từ thông báo VoIP qua `UserNameNotificationListenerService`.
-   - Đổi tên file tự động qua `GlobalSummaryInfo.getFormatSaveFileName`:
-     `[AppName]_[CallerName]_[YYYY-MM-DD_HH-mm-ss].aac`
-     (Ví dụ: `Messenger_Bố_2026-09-19_18-45-00.aac`).
+## Cách cài đặt
 
-## Cách biên dịch
+1. Tải về `SilentAICall.apk` từ mục Releases.
+2. Cài đặt APK lên thiết bị.
+3. Mở LSPosed / Vector -> Kích hoạt module **ColorOS Silent AI Call** -> Chọn scope **Trợ lý tiếp cận (com.coloros.accessibilityassistant)**.
+4. Buộc dừng hoặc khởi động lại ứng dụng `com.coloros.accessibilityassistant`.
 
-Chạy lệnh:
+## Cách biên dịch (Dành cho nhà phát triển)
+
 ```bash
 python build.py
 ```

@@ -62,8 +62,15 @@ for TARGET_APK in $TARGET_APKS; do
 
     # Mount in all zygote namespaces
     for zpid in $(pidof zygote64) $(pidof zygote); do
-      if nsenter -t "$zpid" -m mount -o bind "$PATCHED_APK" "$TARGET_APK" 2>/dev/null; then
+      if nsenter -t "$zpid" -m -- mount -o bind "$PATCHED_APK" "$TARGET_APK" 2>> "$log_file"; then
         log "Mounted over $TARGET_APK in zygote namespace: $zpid"
+      fi
+    done
+
+    # Mount in running app namespaces if already started
+    for apid in $(pidof com.coloros.accessibilityassistant); do
+      if nsenter -t "$apid" -m -- mount -o bind "$PATCHED_APK" "$TARGET_APK" 2>> "$log_file"; then
+        log "Mounted over $TARGET_APK in app namespace: $apid"
       fi
     done
   fi

@@ -1,6 +1,6 @@
 id=silent-ai-call
 name=ColorOS Silent AI Call
-version=1.0
-versionCode=1
+version=1.0.1
+versionCode=1001
 author=Antigravity
 description=Loại bỏ âm thanh cảnh báo 'The session is being recorded' khi ghi âm cuộc gọi trên ColorOS 16.
