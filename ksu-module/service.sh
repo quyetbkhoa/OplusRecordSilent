@@ -164,11 +164,11 @@ watch_and_rename() {
     ')
 
     if [ -n "$notif_info" ]; then
-      local n_pkg=$(echo "$notif_info" | awk -F '||' '{print $1}')
-      local n_app=$(echo "$notif_info" | awk -F '||' '{print $2}')
-      local n_title=$(echo "$notif_info" | awk -F '||' '{print $3}')
-      local n_text=$(echo "$notif_info" | awk -F '||' '{print $4}')
-      local n_convo=$(echo "$notif_info" | awk -F '||' '{print $5}')
+      local n_pkg=$(echo "$notif_info" | awk -F '@@@' '{print $1}')
+      local n_app=$(echo "$notif_info" | awk -F '@@@' '{print $2}')
+      local n_title=$(echo "$notif_info" | awk -F '@@@' '{print $3}')
+      local n_text=$(echo "$notif_info" | awk -F '@@@' '{print $4}')
+      local n_convo=$(echo "$notif_info" | awk -F '@@@' '{print $5}')
 
       # Extract caller name by checking candidates in order
       local extracted=""
@@ -192,6 +192,12 @@ watch_and_rename() {
         esac
 
         c=$(echo "$c" | tr -d '\r\n\t' | sed -e 's/[\\/:*?"<>|]/_/g' -e 's/^[ _]*//' -e 's/[ _]*$//')
+
+        # Filter duration timers like 00:15 or numbers
+        case "$c" in
+          *[0-9]:[0-9]*|[0-9]*) continue ;;
+        esac
+
         local c_lower=$(echo "$c" | tr '[:upper:]' '[:lower:]')
         case "$c_lower" in
           ""|"$n_app"|"messenger"|"zalo"|"telegram"|"whatsapp"|"wechat"|"viber"|"skype"|"meet"|\
@@ -282,8 +288,11 @@ watch_and_rename() {
       for f in "$REC_DIR"/*_??.??.????_??h??.aac; do
         [ -f "$f" ] || continue
         fname="${f##*/}"
-        # Check if there is only one underscore before date (i.e. no caller)
-        # Format: App_DD.MM.YYYY_HHhMM.aac
+
+        # Count underscores: App_DD.MM.YYYY_HHhMM.aac has EXACTLY 2 underscores
+        num_us=$(echo "$fname" | tr -cd '_' | wc -c)
+        [ "$num_us" -eq 2 ] || continue
+
         app="${fname%%_*}"
         rest="${fname#*_}"
         formatted_date="${rest%.aac}"
